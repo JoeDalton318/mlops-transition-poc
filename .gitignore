@@ -1,0 +1,147 @@
+# .gitignore — Professionnel pour Python + MLOps
+# .gitignore — Professional for Python + MLOps
+
+########################################
+# Environnements virtuels / Virtual envs
+########################################
+
+# Common virtual environment folders
+.venv/
+venv/
+env/
+ENV/
+
+# Pipenv / Poetry / pyenv
+/.venv
+Pipfile.lock
+.python-version
+
+# Environment variable files (secrets)
+.env
+.env.*
+
+########################################
+# Python & build artefacts
+########################################
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+sdist/
+develop-eggs/
+pip-wheel-metadata/
+wheelhouse/
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+coverage.xml
+*.cover
+.hypothesis/
+.mypy_cache/
+.pyre/
+.ruff_cache/
+
+########################################
+# MLOps / Data / Models / Logs
+########################################
+
+# Local MLflow tracking and artifacts
+/mlruns/
+
+# Typical model / artifact directories
+/artifacts/
+/models/
+/checkpoints/
+logs/
+
+# Large data files - do not commit datasets or exports
+*.csv
+*.tsv
+*.parquet
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.feather
+*.dat
+*.zip
+*.tar
+
+# Serialized models
+*.pkl
+*.joblib
+*.model
+*.ckpt
+
+########################################
+# Jupyter
+########################################
+
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+########################################
+# IDEs, editors & OS files
+########################################
+
+.vscode/
+.idea/
+.vscode/*
+# macOS
+.DS_Store
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+########################################
+# Docker & CI
+########################################
+
+# Docker
+**/Dockerfile.dev
+docker-compose.override.yml
+
+# CI caches
+.cache/
+
+########################################
+# Secrets, keys & credentials
+########################################
+
+*.pem
+*.key
+*.crt
+credentials
+secret*
+secrets.yml
+
+########################################
+# Logs, runtime files
+########################################
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+
+########################################
+# Misc
+########################################
+
+# OS generated files
+Icon?
+
+# Local IDE workspace settings
+*.sublime-workspace
+
+# End of file
