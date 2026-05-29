@@ -5,7 +5,7 @@
 # Environnements virtuels / Virtual envs
 ########################################
 
-# Common virtual environment folders
+# Common Python virtual environment folders
 .venv/
 venv/
 env/
@@ -44,6 +44,7 @@ htmlcov/
 .coverage
 coverage.xml
 *.cover
+*.coveragerc
 .hypothesis/
 .mypy_cache/
 .pyre/
@@ -61,8 +62,9 @@ coverage.xml
 /models/
 /checkpoints/
 logs/
+/reports/
 
-# Large data files - do not commit datasets or exports
+# Local data and generated assets
 *.csv
 *.tsv
 *.parquet
@@ -74,8 +76,10 @@ logs/
 *.dat
 *.zip
 *.tar
+*.jsonl
+*.log
 
-# Serialized models
+# Serialized models and checkpoints
 *.pkl
 *.joblib
 *.model
@@ -94,23 +98,33 @@ logs/
 
 .vscode/
 .idea/
-.vscode/*
+*.sublime-project
+*.sublime-workspace
+
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
 # Windows
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Linux
+*~
+.nfs*
 
 ########################################
 # Docker & CI
 ########################################
 
 # Docker
-**/Dockerfile.dev
-docker-compose.override.yml
+Dockerfile*
+docker-compose*.yml
+.dockerignore
 
-# CI caches
+# CI caches and temporary files
 .cache/
 
 ########################################
@@ -141,7 +155,9 @@ logs/
 # OS generated files
 Icon?
 
-# Local IDE workspace settings
-*.sublime-workspace
+# Backup and temp files
+*.bak
+*.tmp
+~*$
 
 # End of file
