@@ -1,0 +1,53 @@
+name: MLOps Pipeline - Build & Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        python-version: ['3.12']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@13ae5bb136fac2878aff31522b9efb785519f984 # v4.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt
+
+      - name: Lint with flake8 (optional - warnings only)
+        continue-on-error: true
+        run: |
+          pip install flake8
+          flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics || true
+
+      - name: Run pytest
+        run: |
+          pytest tests/ -v --tb=short
+
+      - name: Build Docker image
+        run: |
+          docker build -t housing-mlops:latest .
+          docker image ls
+
+      - name: Verify Docker image
+        run: |
+          docker run --rm housing-mlops:latest python --version
