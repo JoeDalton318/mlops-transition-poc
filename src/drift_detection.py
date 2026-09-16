@@ -1,16 +1,26 @@
 """
 Data drift detection with continuous training triggering.
+Détection de la dérive des données avec déclenchement de l'entraînement continu.
 
-This module monitors incoming data against a reference dataset using
-Evidently AI. If drift is detected, it automatically triggers model retraining
+This module monitors incoming data against a reference dataset using Evidently AI.
+If drift is detected, it automatically triggers model retraining
 (self-healing MLOps pipeline) to maintain prediction accuracy.
+Ce module surveille les données entrantes par rapport à un ensemble de données de référence à l'aide d'Evidently AI.
+Si une dérive est détectée, il déclenche automatiquement le réentraînement du modèle
+(pipeline MLOps auto-cicatrisant) pour maintenir la précision des prédictions.
 
 The script generates drift reports and logs retraining events for monitoring.
+Le script génère des rapports de dérive et journalise les événements de réentraînement pour la surveillance.
 """
 
 import pandas as pd
+import os
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Charger les variables d'environnement (Load environment variables)
+load_dotenv()
 import logging
 from typing import Dict, Tuple, Optional
 from evidently.report import Report
@@ -27,24 +37,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration
-REFERENCE_DATA_FILE = Path(__file__).parent.parent / 'immobilier_france.csv'
-REPORTS_DIR = Path(__file__).parent.parent / 'drift_reports'
+# Configuration (chargée depuis .env ou par défaut)
+data_file_env = os.getenv('DATA_FILE_PATH', 'data/immobilier_france.csv')
+reports_dir_env = os.getenv('DRIFT_REPORTS_DIR', 'drift_reports')
+
+REFERENCE_DATA_FILE = Path(__file__).parent.parent / data_file_env
+REPORTS_DIR = Path(__file__).parent.parent / reports_dir_env
 DRIFT_THRESHOLD = 0.2  # Trigger retraining if drift score > 20%
 
 
 def create_reference_dataset() -> pd.DataFrame:
     """
     Load the reference dataset for drift comparison.
+    Charge l'ensemble de données de référence pour la comparaison des dérives.
 
     The reference dataset represents the distribution the model was trained on.
     Future data is compared against this baseline to detect drift.
+    L'ensemble de données de référence représente la distribution sur laquelle le modèle a été entraîné.
+    Les données futures sont comparées à cette référence pour détecter la dérive.
 
     Returns:
-        Reference DataFrame.
+        Reference DataFrame. (DataFrame de référence.)
 
     Raises:
-        FileNotFoundError: If reference data file does not exist.
+        FileNotFoundError: If reference data file does not exist. (Si le fichier de données de référence n'existe pas.)
     """
     if not REFERENCE_DATA_FILE.exists():
         raise FileNotFoundError(f'Reference dataset not found at {REFERENCE_DATA_FILE}')
@@ -57,13 +73,15 @@ def create_reference_dataset() -> pd.DataFrame:
 def generate_drift_report(reference_data: pd.DataFrame, current_data: pd.DataFrame) -> Dict:
     """
     Generate Evidently AI drift report comparing current data to reference.
+    Génère un rapport de dérive Evidently AI comparant les données actuelles à la référence.
 
     Args:
-        reference_data: Baseline dataset the model was trained on.
-        current_data: New incoming data to check for drift.
+        reference_data: Baseline dataset the model was trained on. (Jeu de données de référence.)
+        current_data: New incoming data to check for drift. (Nouvelles données entrantes à vérifier.)
 
     Returns:
         Dictionary containing report metadata, HTML path, and drift metrics.
+        Dictionnaire contenant les métadonnées du rapport, le chemin HTML et les métriques de dérive.
     """
     logger.info('Generating drift detection report...')
 
@@ -94,16 +112,19 @@ def generate_drift_report(reference_data: pd.DataFrame, current_data: pd.DataFra
 def check_drift_status(report_dict: Dict) -> Tuple[bool, float]:
     """
     Programmatically extract drift detection status from Evidently report.
+    Extrait par programmation le statut de détection de dérive depuis le rapport Evidently.
 
     This function checks if data drift was detected and returns a drift score.
-    The drift is considered significant if the overall drift share exceeds
-    the configured threshold.
+    The drift is considered significant if the overall drift share exceeds the configured threshold.
+    Cette fonction vérifie si une dérive de données a été détectée et renvoie un score de dérive.
+    La dérive est considérée comme significative si la proportion de dérive globale dépasse le seuil configuré.
 
     Args:
-        report_dict: Report dictionary from Evidently AI.
+        report_dict: Report dictionary from Evidently AI. (Dictionnaire de rapport d'Evidently AI.)
 
     Returns:
         Tuple of (drift_detected: bool, drift_score: float).
+        Tuple indiquant (dérive_détectée: bool, score_de_dérive: float).
     """
     try:
         # Navigate Evidently report structure
@@ -138,16 +159,21 @@ def check_drift_status(report_dict: Dict) -> Tuple[bool, float]:
 def trigger_retraining(drift_score: float) -> Optional[Dict]:
     """
     Trigger model retraining when drift is detected.
+    Déclenche le réentraînement du modèle lorsqu'une dérive est détectée.
 
     This function implements the self-healing mechanism. When data drift
     exceeds the threshold, it automatically calls the training pipeline
     to retrain the model on fresh data, adapting to distribution changes.
+    Cette fonction implémente le mécanisme d'auto-cicatrisation. Lorsque la dérive des données
+    dépasse le seuil, elle appelle automatiquement le pipeline d'entraînement
+    pour réentraîner le modèle sur des données fraîches, s'adaptant aux changements de distribution.
 
     Args:
-        drift_score: Detected drift score for logging.
+        drift_score: Detected drift score for logging. (Score de dérive détecté pour la journalisation.)
 
     Returns:
         Result dictionary from training pipeline, or None if retraining failed.
+        Dictionnaire de résultats du pipeline d'entraînement, ou None si le réentraînement a échoué.
     """
     logger.warning(f'Initiating self-healing retraining (drift_score: {drift_score:.4f})')
 
@@ -173,21 +199,24 @@ def trigger_retraining(drift_score: float) -> Optional[Dict]:
 def run_drift_detection(generate_synthetic_data: bool = True) -> Dict:
     """
     Execute the complete drift detection and self-healing pipeline.
+    Exécute le pipeline complet de détection de dérive et d'auto-cicatrisation.
 
     This function orchestrates the workflow:
-    1. Load reference (training) data
-    2. Optionally generate synthetic current data for demo
-    3. Generate Evidently drift report
-    4. Check if drift is significant
-    5. Trigger retraining if drift detected
+    Cette fonction orchestre le flux de travail :
+    1. Load reference (training) data / Charger les données de référence (entraînement)
+    2. Optionally generate synthetic current data for demo / Générer éventuellement des données actuelles synthétiques pour la démo
+    3. Generate Evidently drift report / Générer le rapport de dérive Evidently
+    4. Check if drift is significant / Vérifier si la dérive est significative
+    5. Trigger retraining if drift detected / Déclencher le réentraînement si une dérive est détectée
 
     Args:
-        generate_synthetic_data: If True, generates synthetic data to simulate drift.
-                               If False, uses immobilier_france.csv as current data.
-                               (Used for demo; production would fetch live data)
+        generate_synthetic_data: If True, generates synthetic data to simulate drift. (Si True, génère des données synthétiques pour simuler la dérive.)
+                               If False, uses immobilier_france.csv as current data. (Si False, utilise immobilier_france.csv comme données actuelles.)
+                               (Used for demo; production would fetch live data) / (Utilisé pour la démo ; la production récupérerait des données en direct)
 
     Returns:
         Dictionary with results of drift detection and any retraining.
+        Dictionnaire avec les résultats de la détection de dérive et de tout réentraînement.
     """
     logger.info('Starting drift detection pipeline...')
 
@@ -238,7 +267,10 @@ def run_drift_detection(generate_synthetic_data: bool = True) -> Dict:
 
 
 def main() -> None:
-    """Entry point for drift detection script."""
+    """
+    Entry point for drift detection script.
+    Point d'entrée pour le script de détection de dérive.
+    """
     logger.info('Drift Detection and Self-Healing Pipeline Started')
     result = run_drift_detection(generate_synthetic_data=True)
 

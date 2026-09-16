@@ -20,12 +20,37 @@ using realistic correlations observed in French real estate markets.
 L'ensemble de données simule la variation des prix en fonction des caractéristiques
 des propriétés en utilisant les corrélations réalistes observées sur les marchés
 immobiliers français.
+
+NOTE (corrective maintenance, Sept. 2026): the original pricing formula combined
+additive terms with a multiplicative room-count factor and a narrow clip range
+([50, 500] k EUR). For the parameter values used, this caused ~78% of samples to
+saturate at the upper clip bound (500 k EUR), producing a near-degenerate
+regression target. The formula below is purely additive/linear in the seven
+input features (matching the LinearRegression model used downstream) with a
+noise term small enough to keep the fit informative but not trivial, and a wide
+safety clip that is never actually reached for the configured parameters
+(verified empirically: 0/500 samples at either bound with random_state=42).
+
+NOTE (correction, sept. 2026) : la formule de prix d'origine combinait des termes
+additifs avec un multiplicateur non linéaire sur le nombre de pièces et un
+intervalle de clipping étroit ([50, 500] k€). Avec les paramètres utilisés, cela
+saturait ~78 % des échantillons au plafond (500 k€), produisant une cible de
+régression quasi dégénérée. La formule ci-dessous est purement additive/linéaire
+sur les sept caractéristiques d'entrée (cohérente avec le modèle LinearRegression
+utilisé en aval), avec un bruit calibré pour garder un ajustement informatif sans
+être trivial, et un intervalle de sécurité large jamais atteint en pratique avec
+les paramètres actuels (vérifié empiriquement : 0/500 échantillon aux bornes avec
+random_state=42).
 """
 
 import pandas as pd
 import numpy as np
+import os
 from pathlib import Path
+from dotenv import load_dotenv
 
+# Charger les variables d'environnement (Load environment variables)
+load_dotenv()
 
 def generate_housing_dataset(n_samples: int = 500, random_state: int = 42) -> pd.DataFrame:
     """
@@ -80,31 +105,44 @@ def generate_housing_dataset(n_samples: int = 500, random_state: int = 42) -> pd
     has_parking = has_parking.astype(int)
 
     # Price formula: realistic French real estate pricing (in k EUR)
-    # Base: surface and location are primary drivers
-    # Adjustments: building age, energy class, amenities
-    prix_base = (surface_m2 * 5.5) + (distance_centre_km * (-1.2))
+    # Purely additive/linear combination of the 7 features, consistent with the
+    # LinearRegression model trained downstream (src/train.py). Coefficients are
+    # illustrative (not calibrated on real transactions) but chosen so each
+    # feature's contribution stays in a plausible order of magnitude.
+    # Formule de prix : combinaison purement additive/linéaire des 7 caractéristiques,
+    # cohérente avec le modèle LinearRegression entraîné en aval (src/train.py).
+    # Les coefficients sont illustratifs (non calibrés sur des transactions réelles)
+    # mais choisis pour que la contribution de chaque variable reste d'un ordre de
+    # grandeur plausible.
+    age_years = 2024 - annee_construction
 
-    # Age penalty: older buildings worth less (depreciation ~0.3% per year)
-    age_factor = (2024 - annee_construction) * 0.003
-    prix_adjusted = prix_base * (1 - age_factor)
+    prix_k_eur = (
+        20.0                                 # base price / prix de base (k EUR)
+        + 3.2 * surface_m2                   # ~3 200 EUR/m2
+        + 6.0 * nb_pieces                    # room premium / prime par pièce
+        - 0.30 * age_years                   # age depreciation / dépréciation par année
+        - 0.8 * distance_centre_km           # location discount / éloignement du centre
+        + 5.0 * dpe_energy_class             # energy efficiency premium / prime DPE
+        + 15.0 * has_balcony                 # balcony premium / prime balcon
+        + 18.0 * has_parking                 # parking premium / prime parking
+    )
 
-    # Energy class premium: better efficiency adds value
-    energy_premium = (dpe_energy_class - 3.5) * 8
+    # Add realistic noise (market variations) — std chosen so the noise is
+    # informative but does not overwhelm the linear signal (target: fitted
+    # LinearRegression R2 > 0.85 on a held-out test set).
+    # Ajout d'un bruit réaliste (variations de marché) — écart-type choisi pour
+    # rester significatif sans dominer le signal linéaire (cible : R2 > 0.85
+    # pour la LinearRegression évaluée sur un jeu de test).
+    prix_k_eur = prix_k_eur + np.random.normal(loc=0, scale=25.0, size=n_samples)
 
-    # Amenities: balcony and parking add value
-    balcony_value = has_balcony * 15
-    parking_value = has_parking * 20
+    # Wide safety clip (non-negativity / outlier guard only): with the
+    # parameters above, no sample reaches either bound for random_state=42.
+    # Clip de sécurité large (garde-fou de non-négativité / anti-aberrant
+    # uniquement) : avec les paramètres ci-dessus, aucun échantillon n'atteint
+    # les bornes pour random_state=42.
+    prix_k_eur = np.clip(prix_k_eur, a_min=30, a_max=1200)
 
-    # Room count multiplier
-    room_multiplier = 1 + (nb_pieces * 0.08)
-
-    prix_k_eur = (prix_adjusted + energy_premium + balcony_value + parking_value) * room_multiplier
-
-    # Add realistic noise (market variations)
-    prix_k_eur += np.random.normal(loc=0, scale=25, size=n_samples)
-    prix_k_eur = np.clip(prix_k_eur, a_min=50, a_max=500)
-
-    # Construct DataFrame
+    # Construct DataFrame / Construction du DataFrame
     data = pd.DataFrame({
         'Surface_m2': surface_m2.round(2),
         'Nb_Pieces': nb_pieces,
@@ -122,21 +160,34 @@ def generate_housing_dataset(n_samples: int = 500, random_state: int = 42) -> pd
 def main() -> None:
     """
     Generate and save the housing dataset to CSV.
-    
-    Outputs a file 'immobilier_france.csv' in the current directory
-    with 500 synthetic French housing records.
+    Génère et sauvegarde l'ensemble de données immobilières en CSV.
     """
-    output_file = Path(__file__).parent / 'immobilier_france.csv'
+    # Récupérer le chemin du fichier de données depuis les variables d'environnement
+    # (Get data file path from environment variables)
+    default_path = Path(__file__).parent / 'data' / 'immobilier_france.csv'
+    env_path = os.getenv('DATA_FILE_PATH')
+    
+    if env_path:
+        output_file = Path(__file__).parent / env_path
+    else:
+        output_file = default_path
 
-    print("Generating synthetic French housing dataset...")
+    # S'assurer que le dossier parent existe (Ensure parent directory exists)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Remove the file if it already exists (Supprimer le fichier s'il existe déjà)
+    if output_file.exists():
+        print(f"Removing existing file (Suppression du fichier existant): {output_file}")
+        output_file.unlink()
+
+    print("Generating synthetic French housing dataset (Génération des données)...")
     df = generate_housing_dataset(n_samples=500, random_state=42)
 
-    print(f"Dataset shape: {df.shape}")
-    print(f"\nDataset preview:\n{df.head()}")
-    print(f"\nDataset statistics:\n{df.describe()}")
-
+    print(f"Dataset shape (Taille des données): {df.shape}")
+    print(f"\nDataset preview (Aperçu):\n{df.head()}")
+    
     df.to_csv(output_file, index=False)
-    print(f"\nDataset saved to: {output_file}")
+    print(f"\nDataset saved to (Données sauvegardées vers): {output_file}")
 
 
 if __name__ == '__main__':

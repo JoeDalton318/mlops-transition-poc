@@ -39,6 +39,21 @@ jobs:
           pip install flake8
           flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics || true
 
+      # Doit s'exécuter AVANT pytest : plusieurs tests (test_real_dataset_baseline_r2_above_threshold
+      # dans test_train.py, l'intégralité de test_data_schema.py) lisent data/immobilier_france.csv,
+      # qui est volontairement absent du dépôt (.gitignore) et n'existe donc pas sur un runner fraîchement
+      # cloné tant qu'il n'a pas été généré ici. Doit aussi précéder le test API (model chargé -> 200
+      # plutôt que 503) et le build Docker (COPY mlruns nécessite un run d'entraînement préalable).
+      # Must run BEFORE pytest: several tests (test_real_dataset_baseline_r2_above_threshold in
+      # test_train.py, all of test_data_schema.py) read data/immobilier_france.csv, which is
+      # intentionally absent from the repo (.gitignore) and so does not exist on a freshly cloned
+      # runner until generated here. Must also precede the API test (model loaded -> 200 rather than
+      # 503) and the Docker build (COPY mlruns needs a prior training run).
+      - name: Generate Data and Train Model
+        run: |
+          python generate_data.py
+          python src/train.py
+
       - name: Run pytest
         run: |
           pytest tests/ -v --tb=short

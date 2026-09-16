@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  mlflow:
+    build: .
+    container_name: mlops_mlflow
+    entrypoint: ["mlflow", "server", "--host", "0.0.0.0", "--port", "${MLFLOW_PORT:-5000}", "--backend-store-uri", "${MLFLOW_BACKEND_STORE_URI:-sqlite:///mlflow.db}", "--default-artifact-root", "${MLFLOW_DEFAULT_ARTIFACT_ROOT:-./mlruns}"]
+    ports:
+      - "${MLFLOW_PORT:-5000}:${MLFLOW_PORT:-5000}"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    networks:
+      - mlops_net
+
+  api:
+    build: .
+    container_name: mlops_api
+    entrypoint: ["uvicorn", "src.app:app", "--host", "${API_HOST:-0.0.0.0}", "--port", "${API_PORT:-8000}", "--reload"]
+    ports:
+      - "${API_PORT:-8000}:${API_PORT:-8000}"
+    depends_on:
+      - mlflow
+    env_file:
+      - .env
+    environment:
+      # Surcharge pour le réseau Docker interne (Override for internal Docker network)
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    volumes:
+      - .:/app
+    networks:
+      - mlops_net
+
+  dashboard:
+    build: .
+    container_name: mlops_dashboard
+    entrypoint: ["streamlit", "run", "src/dashboard.py", "--server.port", "${DASHBOARD_PORT:-8501}", "--server.address", "0.0.0.0"]
+    ports:
+      - "${DASHBOARD_PORT:-8501}:${DASHBOARD_PORT:-8501}"
+    depends_on:
+      - api
+    env_file:
+      - .env
+    environment:
+      # Surcharge pour que le Dashboard contacte l'API via le réseau interne
+      # (Override so Dashboard contacts API via internal network)
+      - API_BASE_URL=http://api:8000
+      # Le bouton "Run Continuous Training" du dashboard exécute src/drift_detection.py
+      # (via subprocess), qui importe src/train.py : celui-ci a besoin de joindre le
+      # serveur MLflow pour journaliser le run et lire/écrire l'alias 'champion'. Sans
+      # cette surcharge, la variable MLFLOW_TRACKING_URI issue de .env
+      # (http://localhost:5000) pointerait vers le conteneur dashboard lui-même, où
+      # aucun serveur MLflow n'écoute -> échec silencieux du réentraînement déclenché
+      # depuis l'UI.
+      # The dashboard's "Run Continuous Training" button runs src/drift_detection.py
+      # (via subprocess), which imports src/train.py: that module needs to reach the
+      # MLflow server to log the run and read/write the 'champion' alias. Without this
+      # override, the MLFLOW_TRACKING_URI from .env (http://localhost:5000) would point
+      # at the dashboard container itself, where no MLflow server listens -> the
+      # UI-triggered retraining would silently fail.
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    volumes:
+      - .:/app
+    networks:
+      - mlops_net
+
+networks:
+  mlops_net:
+    driver: bridge

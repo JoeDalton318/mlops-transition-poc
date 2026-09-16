@@ -1,0 +1,12 @@
+# Normalise les fins de ligne en LF pour tout fichier texte, quelle que soit
+# la plateforme sur laquelle il est édité (Windows/macOS/Linux), afin d'éviter
+# des diffs Git bruyants dus uniquement à des différences de fin de ligne.
+* text=auto eol=lf
+
+# Fichiers binaires explicitement marqués (pas de conversion, pas de diff texte)
+*.pkl binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.db binary

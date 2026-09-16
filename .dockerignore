@@ -1,0 +1,48 @@
+# Python virtual environments
+venv/
+.venv/
+ENV/
+env/
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Git and editor files
+.git/
+.vscode/
+.idea/
+
+# Docker build artifacts and local data
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Data files and generated content
+*.csv
+*.tsv
+*.parquet
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.feather
+*.log
+*.db
+*.sqlite
+generate_data.py
+immobilier_france.csv
+
+# OS temporary files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Optional local build tools
+*.egg-info/
+build/
+dist/
+*.whl
+pip-wheel-metadata/
