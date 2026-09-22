@@ -371,6 +371,12 @@ def run_pipeline(trigger_source: str = 'manual') -> Dict[str, Any]:
             if promotion['champion_metric_before'] is not None:
                 mlflow.log_metric('champion_metric_before', promotion['champion_metric_before'])
 
+            # Tags de gouvernance, lignage et audit (Governance, lineage & audit tags)
+            mlflow.set_tag('model_type', 'LinearRegression')
+            mlflow.set_tag('dataset_name', 'immobilier_france.csv')
+            mlflow.set_tag('pipeline_stage', 'continuous_training' if trigger_source == 'drift_detection' else 'initial_training')
+            mlflow.set_tag('environment', 'production' if promotion['promoted'] else 'staging')
+
             if promotion['promoted']:
                 mlflow.log_artifact(str(model_path), artifact_path='models')
                 logger.info("Model saved to %s (promoted to '%s')", model_path, CHAMPION_ALIAS)

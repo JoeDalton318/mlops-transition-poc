@@ -1,5 +1,5 @@
 # 1. Image de base légère et officielle Python
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 # 2. Bonnes pratiques de sécurité : Création d'un utilisateur non-root
 RUN groupadd --system mlopsuser && useradd --system --gid mlopsuser --create-home --home-dir /home/mlopsuser mlopsuser

@@ -1,15 +1,20 @@
 """
 Data drift detection with continuous training triggering.
+
 Détection de la dérive des données avec déclenchement de l'entraînement continu.
+
 
 This module monitors incoming data against a reference dataset using Evidently AI.
 If drift is detected, it automatically triggers model retraining
 (self-healing MLOps pipeline) to maintain prediction accuracy.
+
 Ce module surveille les données entrantes par rapport à un ensemble de données de référence à l'aide d'Evidently AI.
 Si une dérive est détectée, il déclenche automatiquement le réentraînement du modèle
 (pipeline MLOps auto-cicatrisant) pour maintenir la précision des prédictions.
 
+
 The script generates drift reports and logs retraining events for monitoring.
+
 Le script génère des rapports de dérive et journalise les événements de réentraînement pour la surveillance.
 """
 

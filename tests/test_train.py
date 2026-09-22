@@ -13,9 +13,11 @@ MLflow factice injecté en dépendance — aucun serveur de tracking MLflow rée
 n'est nécessaire).
 """
 
+import contextlib
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -249,6 +251,92 @@ def test_promotion_worse_or_equal_challenger_is_not_promoted(tmp_path):
     assert result_equal['promoted'] is False
     assert result_worse['promoted'] is False
     assert not model_path.exists()
+
+
+def test_run_pipeline_logs_governance_tags(monkeypatch, tmp_path):
+    """
+    run_pipeline() must record the four governance/audit tags on every run
+    (model_type, dataset_name, pipeline_stage, environment), with values
+    derived from the trigger source and from the promotion decision: a first
+    manual run is promoted ('initial_training', 'production'), while a
+    drift-triggered run that does not beat the champion stays in 'staging'
+    ('continuous_training'). MLflow calls are replaced by in-memory fakes, so
+    no tracking server or database is needed.
+
+    run_pipeline() doit enregistrer les quatre étiquettes de gouvernance et
+    d'audit à chaque exécution (model_type, dataset_name, pipeline_stage,
+    environment), avec des valeurs dérivées de la source du déclenchement et
+    de la décision de promotion : un premier entraînement manuel est promu
+    ('initial_training', 'production'), tandis qu'un réentraînement déclenché
+    par la dérive qui ne bat pas le champion reste en 'staging'
+    ('continuous_training'). Les appels MLflow sont remplacés par des doubles
+    en mémoire : aucun serveur de suivi ni base de données n'est nécessaire.
+    """
+    rng = np.random.default_rng(3)
+    n = 40
+    data = pd.DataFrame({
+        'Surface_m2': rng.uniform(30, 200, n),
+        'Nb_Pieces': rng.integers(1, 6, n),
+        'Annee_Construction': rng.integers(1950, 2024, n),
+        'Distance_Centre_km': rng.uniform(0.5, 30, n),
+        'DPE_Energy_Class': rng.integers(1, 8, n),
+        'Has_Balcony': rng.integers(0, 2, n),
+        'Has_Parking': rng.integers(0, 2, n),
+    })
+    data['Prix_k_EUR'] = 3 * data['Surface_m2'] - 2 * data['Distance_Centre_km'] + 50
+    data_file = tmp_path / 'immobilier_france.csv'
+    data.to_csv(data_file, index=False)
+    monkeypatch.setattr(train, 'DATA_FILE', data_file)
+    monkeypatch.setattr(train, 'MODELS_DIR', tmp_path / 'models')
+
+    tags: Dict[str, str] = {}
+    active_run_id = {'value': 'run-1'}
+    monkeypatch.setattr(train.mlflow, 'set_experiment', lambda name: None)
+    monkeypatch.setattr(train.mlflow, 'start_run', lambda **kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(train.mlflow, 'log_param', lambda key, value: None)
+    monkeypatch.setattr(train.mlflow, 'log_metric', lambda key, value: None)
+    monkeypatch.setattr(train.mlflow, 'log_artifact', lambda *args, **kwargs: None)
+    monkeypatch.setattr(train.mlflow, 'set_tag', lambda key, value: tags.__setitem__(key, value))
+    monkeypatch.setattr(train.mlflow.sklearn, 'log_model', lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        train.mlflow, 'active_run',
+        lambda: SimpleNamespace(info=SimpleNamespace(run_id=active_run_id['value'])),
+    )
+
+    # 1) Premier entraînement manuel, aucun champion : promu (First manual run, no champion: promoted)
+    first_client = FakeMlflowClient(champion_version=None)
+    first_client.register_challenger_run('run-1', '1')
+    monkeypatch.setattr(train, 'MlflowClient', lambda: first_client)
+
+    first = train.run_pipeline(trigger_source='manual')
+
+    assert first['status'] == 'success', first['message']
+    assert first['promoted'] is True
+    assert tags == {
+        'model_type': 'LinearRegression',
+        'dataset_name': 'immobilier_france.csv',
+        'pipeline_stage': 'initial_training',
+        'environment': 'production',
+    }
+
+    # 2) Réentraînement par dérive face à un champion imbattable : non promu
+    #    (Drift-triggered retraining against an unbeatable champion: not promoted)
+    tags.clear()
+    active_run_id['value'] = 'run-2'
+    drift_client = FakeMlflowClient(champion_version='1', champion_metrics={'r2': 1.0})
+    drift_client.register_challenger_run('run-2', '2')
+    monkeypatch.setattr(train, 'MlflowClient', lambda: drift_client)
+
+    retrained = train.run_pipeline(trigger_source='drift_detection')
+
+    assert retrained['status'] == 'success', retrained['message']
+    assert retrained['promoted'] is False
+    assert tags == {
+        'model_type': 'LinearRegression',
+        'dataset_name': 'immobilier_france.csv',
+        'pipeline_stage': 'continuous_training',
+        'environment': 'staging',
+    }
 
 
 # --------------------------------------------------------------------------

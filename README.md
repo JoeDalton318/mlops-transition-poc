@@ -56,9 +56,9 @@ partagée par `generate_data.py` et `src/train.py` (voir `tests/test_train.py::t
 
 - **R² du modèle champion** : 0,9780 (jeu de test, split 80/20)
 - **Score de dérive** (perturbation de démonstration `Surface_m2 += 10`, `Prix_k_EUR *= 1.15`,
-  `src/drift_detection.py::run_drift_detection`) : 0,50 — au-dessus du seuil `DRIFT_THRESHOLD`
+  `src/drift_detection.py::run_drift_detection`) : 0,25 (2 colonnes sur 8 en dérive) — au-dessus du seuil `DRIFT_THRESHOLD`
   (0,20), déclenchant le réentraînement automatique.
-- **Suite de tests** : 83/83 tests passants (`pytest tests/ -v`), voir la section « Tests ».
+- **Suite de tests** : 84/84 tests passants (`pytest tests/ -v`), voir la section « Tests ».
 
 ## Stack technique
 
@@ -79,7 +79,7 @@ memoire-mlops-demo/
 │   ├── app.py               # API FastAPI de prédiction (/predict, /health)
 │   ├── drift_detection.py   # Détection de dérive Evidently AI + déclenchement du réentraînement
 │   └── dashboard.py         # Tableau de bord Streamlit (prédiction, dérive, pilotage du réentraînement)
-├── tests/                          # Suite pytest (83 tests, voir "Tests" ci-dessous)
+├── tests/                          # Suite pytest (84 tests, voir "Tests" ci-dessous)
 │   ├── test_train.py               # Unitaires : entraînement, coefficients, reproductibilité
 │   ├── test_app_robustness.py      # Robustesse : modèle manquant/corrompu, API 503
 │   ├── test_data_schema.py         # Schéma et qualité du jeu de données
@@ -220,11 +220,11 @@ python src/train.py
 pytest tests/ -v
 ```
 
-**83 tests** au total, répartis en six catégories :
+**84 tests** au total, répartis en six catégories :
 
 | Catégorie | Fichier(s) | Tests | Contenu |
 |---|---|---|---|
-| Unitaires (entraînement) | `test_train.py` | 15 | Schéma des données, métriques, signe des coefficients économiques (`Surface_m2`>0, `Distance_Centre_km`<0), monotonicité, reproductibilité stricte (`RANDOM_STATE=42`), dataset vide/manquant, porte de promotion champion/challenger |
+| Unitaires (entraînement) | `test_train.py` | 16 | Schéma des données, métriques, signe des coefficients économiques (`Surface_m2`>0, `Distance_Centre_km`<0), monotonicité, reproductibilité stricte (`RANDOM_STATE=42`), dataset vide/manquant, porte de promotion champion/challenger, enregistrement des tags de gouvernance MLflow (`model_type`, `dataset_name`, `pipeline_stage`, `environment`) |
 | Robustesse (API/modèle) | `test_app_robustness.py` | 6 | Modèle manquant/corrompu (`load_model`), réponse 503 si modèle absent, cas de contrôle avec modèle valide |
 | Schéma de données | `test_data_schema.py` | 14 | Colonnes, bornes Pydantic, valeurs binaires, non-saturation du prix (garde-fou du bug historique) |
 | Fonctionnels (API) | `test_api.py` | 28 | `/health`, `/predict`, validation des 7 bornes Pydantic (valeurs limites acceptées/rejetées), scénario métier nominal (T3 65 m² + parking), stabilité sur requêtes successives |
