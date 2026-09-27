@@ -27,7 +27,9 @@ avertissement "missing ScriptRunContext") plutôt que de planter lors d'un
 tel import --- mais ce comportement n'a pas été vérifié indépendamment en
 exécutant cette suite dans cet environnement. Si cette hypothèse s'avère
 fausse, ce module entier est ignoré (skip, pas échec) au moment de la
-collecte, afin de ne pas casser le reste de `pytest tests/ -v`.
+collecte, afin de ne pas casser le reste de `pytest tests/ -v`. Ce filet
+ne couvre que l'échec d'import : le fichier est d'abord compilé, de sorte
+qu'une erreur de syntaxe fasse échouer la suite au lieu d'être ignorée.
 """
 
 import os
@@ -40,9 +42,20 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
+_DASHBOARD_SOURCE = Path(__file__).parent.parent / 'src' / 'dashboard.py'
+
+# Le filet de sécurité ci-dessous ne doit couvrir que l'hypothèse d'environnement décrite
+# plus haut (Streamlit importé hors contexte). Une faute de syntaxe ou un import cassé dans
+# src/dashboard.py doit faire échouer la suite, pas l'ignorer : compiler le fichier d'abord
+# garantit qu'un module invalide ne passe jamais inaperçu.
+# The guard below must only cover the environment assumption documented above. A syntax error
+# or a broken import in src/dashboard.py must fail the suite, not skip it: compiling the file
+# first ensures an invalid module never slips through unnoticed.
+compile(_DASHBOARD_SOURCE.read_text(encoding='utf-8'), str(_DASHBOARD_SOURCE), 'exec')
+
 try:
     import dashboard  # noqa: E402
-except Exception as exc:  # pragma: no cover - environment-dependent import guard
+except ImportError as exc:  # pragma: no cover - environment-dependent import guard
     pytest.skip(
         f'src/dashboard.py could not be imported outside a `streamlit run` '
         f'context in this environment ({exc!r}); skipping dashboard '
