@@ -71,7 +71,7 @@ def load_and_prepare_data() -> Tuple[pd.DataFrame, pd.Series]:
     Returns:
         Tuple of (features DataFrame, target Series).
         Tuple de (DataFrame des caractéristiques, Series de la cible).
-    
+
     Raises:
         FileNotFoundError: If the data file does not exist. (Si le fichier de données n'existe pas.)
     """

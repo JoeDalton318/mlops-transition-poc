@@ -19,6 +19,13 @@ Pipfile.lock
 # Environment variable files (secrets)
 .env
 .env.*
+# Exception : le modèle de configuration est versionné (aucune valeur sensible,
+# uniquement des noms de variables, des ports et des chemins locaux). Il est
+# indispensable à l'installation : docker compose échoue sans fichier .env.
+# Exception: the configuration template is versioned (no sensitive value, only
+# variable names, ports and local paths). It is required for installation:
+# docker compose fails without a .env file.
+!.env.example
 
 ########################################
 # Python & build artefacts

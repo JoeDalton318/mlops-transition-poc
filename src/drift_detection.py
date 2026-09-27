@@ -30,10 +30,9 @@ import logging
 from typing import Dict, Tuple, Optional
 from evidently.report import Report
 from evidently.metric_preset import DataDriftPreset
-import sys
 
 # Import training pipeline
-from train import run_pipeline, load_and_prepare_data
+from train import run_pipeline
 
 # Configure logging
 logging.basicConfig(
@@ -299,7 +298,7 @@ def main() -> None:
     result = run_drift_detection(generate_synthetic_data=True)
 
     if result['drift_detected']:
-        print(f"\nDrift Detection Results:")
+        print("\nDrift Detection Results:")
         print(f"  Drift Score: {result['drift_score']:.4f}")
         print(f"  Report: {result['report_path']}")
         print(f"  Retraining Triggered: {result['retraining_triggered']}")
