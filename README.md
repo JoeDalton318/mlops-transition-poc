@@ -56,9 +56,10 @@ partagée par `generate_data.py` et `src/train.py` (voir `tests/test_train.py::t
 
 - **R² du modèle champion** : 0,9780 (jeu de test, split 80/20)
 - **Score de dérive** (perturbation de démonstration `Surface_m2 += 10`, `Prix_k_EUR *= 1.15`,
-  `src/drift_detection.py::run_drift_detection`) : 0,25 (2 colonnes sur 8 en dérive) — au-dessus du seuil `DRIFT_THRESHOLD`
+  `src/drift_detection.py::run_drift_detection`) : 0,25 (2 colonnes sur 8 en dérive, part lue dans
+  `share_of_drifted_columns`) — au-dessus du seuil `DRIFT_THRESHOLD`
   (0,20), déclenchant le réentraînement automatique.
-- **Suite de tests** : 84/84 tests passants (`pytest tests/ -v`), voir la section « Tests ».
+- **Suite de tests** : 86/86 tests passants (`pytest tests/ -v`), voir la section « Tests ».
 
 ## Stack technique
 
@@ -79,13 +80,13 @@ memoire-mlops-demo/
 │   ├── app.py               # API FastAPI de prédiction (/predict, /health)
 │   ├── drift_detection.py   # Détection de dérive Evidently AI + déclenchement du réentraînement
 │   └── dashboard.py         # Tableau de bord Streamlit (prédiction, dérive, pilotage du réentraînement)
-├── tests/                          # Suite pytest (84 tests, voir "Tests" ci-dessous)
+├── tests/                          # Suite pytest (86 tests, voir "Tests" ci-dessous)
 │   ├── test_train.py               # Unitaires : entraînement, coefficients, reproductibilité
 │   ├── test_app_robustness.py      # Robustesse : modèle manquant/corrompu, API 503
 │   ├── test_data_schema.py         # Schéma et qualité du jeu de données
 │   ├── test_api.py                 # Fonctionnels : API (bornes Pydantic, scénario métier)
 │   ├── test_dashboard.py           # Fonctionnels : utilitaires du tableau de bord Streamlit
-│   ├── test_drift.py                # Détection de dérive (logique pure, sans calcul Evidently réel)
+│   ├── test_drift.py                # Détection de dérive (logique pure, rapports simulés à la structure Evidently réelle)
 │   └── test_integration_pipeline.py # Intégration E2E : boucle self-healing, API + modèle réel
 ├── data/
 │   └── immobilier_france.csv  # Jeu de données synthétique (voir "Jeu de données" ci-dessous)
@@ -220,7 +221,7 @@ python src/train.py
 pytest tests/ -v
 ```
 
-**84 tests** au total, répartis en six catégories :
+**86 tests** au total, répartis en six catégories :
 
 | Catégorie | Fichier(s) | Tests | Contenu |
 |---|---|---|---|
@@ -229,10 +230,10 @@ pytest tests/ -v
 | Schéma de données | `test_data_schema.py` | 14 | Colonnes, bornes Pydantic, valeurs binaires, non-saturation du prix (garde-fou du bug historique) |
 | Fonctionnels (API) | `test_api.py` | 28 | `/health`, `/predict`, validation des 7 bornes Pydantic (valeurs limites acceptées/rejetées), scénario métier nominal (T3 65 m² + parking), stabilité sur requêtes successives |
 | Fonctionnels (dashboard) | `test_dashboard.py` | 9 | `check_api_health`, `get_latest_drift_report`, `send_prediction_request` (y compris gestion gracieuse de l'API hors-ligne) |
-| Dérive | `test_drift.py` | 8 | Extraction du statut de dérive, seuillage, déclenchement du réentraînement (logique pure, sans calcul Evidently réel) |
-| **Intégration E2E** | `test_integration_pipeline.py` | 3 | Boucle self-healing complète (entraînement → dérive Evidently réelle → réentraînement → décision de promotion), promotion positive avec challenger réellement meilleur, réactivité API/modèle aux changements d'artefact |
+| Dérive | `test_drift.py` | 9 | Extraction de la part de colonnes en dérive (`share_of_drifted_columns`, repli sur `drift_share`), seuillage, déclenchement du réentraînement (logique pure, rapports simulés reproduisant la structure d'un vrai rapport Evidently 0.4.18) |
+| **Intégration E2E** | `test_integration_pipeline.py` | 4 | Boucle self-healing complète (entraînement → dérive Evidently réelle de 0,25 → réentraînement → décision de promotion), non-régression du score de dérive (données identiques : score 0, aucun réentraînement), promotion positive avec challenger réellement meilleur, réactivité API/modèle aux changements d'artefact |
 
-Les 3 tests d'intégration exécutent un vrai calcul Evidently AI et un vrai registre MLflow
+Les 4 tests d'intégration exécutent un vrai calcul Evidently AI et un vrai registre MLflow
 (redirigé vers une base SQLite temporaire, isolée du `mlflow.db` réel — voir la fixture
 `isolated_mlops_environment`) : plus lents que le reste de la suite, ils sont marqués
 `@pytest.mark.integration` (déclaré dans `pytest.ini`). Pour une boucle de développement rapide

@@ -59,8 +59,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import app  # noqa: E402
+import generate_data  # noqa: E402
 import drift_detection  # noqa: E402
 import train  # noqa: E402
 
@@ -195,13 +197,16 @@ def test_full_self_healing_loop_champion_then_drift_then_retrain(isolated_mlops_
     calls run_pipeline() without ever forwarding the drifted current_data
     it just detected drift on) into an executable regression check.
 
-    Steps: (1) train an initial champion on a synthetic dataset; (2) run
+    Steps: (1) train an initial champion on the dataset produced by the
+    project's own generator (generate_data.generate_housing_dataset with its
+    default seed, i.e. the same data as data/immobilier_france.csv); (2) run
     drift_detection.run_drift_detection(generate_synthetic_data=True), the
     real production self-healing entry point, which internally perturbs a
     copy of the reference data (Surface_m2 += 10, Prix_k_EUR *= 1.15) and
     runs a real Evidently DataDriftPreset report against it; (3) because
-    that perturbation is a systematic, whole-population shift, it must be
-    detected as drift; (4) because trigger_retraining() only ever calls
+    that perturbation is a systematic, whole-population shift, Evidently
+    must flag exactly 2 of the 8 columns (Surface_m2, Prix_k_EUR), i.e. a
+    drift score of 0.25 > DRIFT_THRESHOLD, as reported in the memoire; (4) because trigger_retraining() only ever calls
     run_pipeline(trigger_source='drift_detection') -- which reloads
     train.DATA_FILE from disk, i.e. the *unperturbed* reference data, not
     the drifted current_data -- the resulting challenger is trained on
@@ -217,7 +222,7 @@ def test_full_self_healing_loop_champion_then_drift_then_retrain(isolated_mlops_
     current_data derivees qu'elle vient pourtant de detecter comme
     derivantes) en un controle de regression executable.
     """
-    df = _make_synthetic_dataset(n=250, seed=1, signal_strength=0.9)
+    df = generate_data.generate_housing_dataset()
     df.to_csv(isolated_mlops_environment.data_file, index=False)
 
     initial_result = train.run_pipeline(trigger_source='manual')
@@ -231,6 +236,10 @@ def test_full_self_healing_loop_champion_then_drift_then_retrain(isolated_mlops_
         f"A systematic +10 Surface_m2 / *1.15 Prix_k_EUR shift over the whole "
         f"population must be detected as drift (got drift_score="
         f"{detection_result.get('drift_score')})."
+    )
+    assert detection_result['drift_score'] == pytest.approx(0.25), (
+        'Exactly 2 of the 8 columns (Surface_m2, Prix_k_EUR) must drift, '
+        'i.e. the share of drifted columns reported in the memoire.'
     )
     assert detection_result['retraining_triggered'] is True
 
@@ -248,6 +257,38 @@ def test_full_self_healing_loop_champion_then_drift_then_retrain(isolated_mlops_
         'Because the challenger cannot strictly beat the champion R2 (identical '
         'data/split), the promotion gate must correctly refuse to promote it.'
     )
+
+
+@pytest.mark.integration
+def test_identical_current_data_reports_no_drift_and_no_retraining(isolated_mlops_environment, monkeypatch):
+    """
+    Non-regression check for the drift score: comparing the reference data
+    with an identical copy (run_drift_detection(generate_synthetic_data=False))
+    must yield a drift score of exactly 0.0, no drift and no retraining. It
+    runs a real Evidently DataDriftPreset report, whose 'drift_share' key is
+    Evidently's own threshold (0.5): reading that key as the score would
+    flag drift on identical data and trigger a useless retraining.
+
+    Contrôle de non-régression du score de dérive : comparer les données de
+    référence à une copie identique doit donner un score de dérive de
+    exactement 0.0, aucune dérive et aucun réentraînement. Le test exécute un
+    vrai rapport Evidently DataDriftPreset, dont la clé 'drift_share' est le
+    seuil propre à Evidently (0.5) : lire cette clé comme score signalerait
+    une dérive sur des données identiques et déclencherait un réentraînement
+    inutile.
+    """
+    df = generate_data.generate_housing_dataset()
+    df.to_csv(isolated_mlops_environment.data_file, index=False)
+
+    retraining_calls = []
+    monkeypatch.setattr(drift_detection, 'trigger_retraining', lambda drift_score: retraining_calls.append(drift_score))
+
+    result = drift_detection.run_drift_detection(generate_synthetic_data=False)
+
+    assert result['drift_score'] == 0.0
+    assert result['drift_detected'] is False
+    assert result['retraining_triggered'] is False
+    assert retraining_calls == []
 
 
 @pytest.mark.integration

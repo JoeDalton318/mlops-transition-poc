@@ -120,9 +120,16 @@ def check_drift_status(report_dict: Dict) -> Tuple[bool, float]:
     Extrait par programmation le statut de détection de dérive depuis le rapport Evidently.
 
     This function checks if data drift was detected and returns a drift score.
-    The drift is considered significant if the overall drift share exceeds the configured threshold.
+    The drift score is the observed share of drifted columns ('share_of_drifted_columns'),
+    and drift is considered significant if it exceeds DRIFT_THRESHOLD. In Evidently 0.4.x,
+    'drift_share' is NOT a measurement: it is the dataset-level drift threshold configured in
+    Evidently (0.5 by default). It is only used as a fallback if the observed share is absent.
     Cette fonction vérifie si une dérive de données a été détectée et renvoie un score de dérive.
-    La dérive est considérée comme significative si la proportion de dérive globale dépasse le seuil configuré.
+    Le score de dérive est la part observée de colonnes en dérive ('share_of_drifted_columns'),
+    et la dérive est considérée comme significative si elle dépasse DRIFT_THRESHOLD. Dans
+    Evidently 0.4.x, 'drift_share' n'est PAS une mesure : c'est le seuil de dérive du jeu de
+    données configuré dans Evidently (0.5 par défaut). Il ne sert qu'en repli si la part
+    observée est absente.
 
     Args:
         report_dict: Report dictionary from Evidently AI. (Dictionnaire de rapport d'Evidently AI.)
@@ -136,16 +143,28 @@ def check_drift_status(report_dict: Dict) -> Tuple[bool, float]:
         metrics = report_dict.get('metrics', [])
 
         # Look for data drift metric results
-        drift_detected = False
-        drift_score = 0.0
+        observed_share: Optional[float] = None
+        fallback_share: Optional[float] = None
 
         for metric in metrics:
             if 'result' in metric and isinstance(metric['result'], dict):
                 result = metric['result']
-                # Check for drift share metric
-                if 'drift_share' in result:
-                    drift_score = result['drift_share']
-                    drift_detected = drift_score > DRIFT_THRESHOLD
+                # Part observée de colonnes en dérive (Observed share of drifted columns)
+                if 'share_of_drifted_columns' in result:
+                    observed_share = float(result['share_of_drifted_columns'])
+                # Repli uniquement : dans Evidently 0.4.x, 'drift_share' est le seuil configuré
+                # (Fallback only: in Evidently 0.4.x, 'drift_share' is the configured threshold)
+                elif 'drift_share' in result:
+                    fallback_share = float(result['drift_share'])
+
+        drift_score = 0.0
+        if observed_share is not None:
+            drift_score = observed_share
+        elif fallback_share is not None:
+            logger.warning("'share_of_drifted_columns' not found in report; falling back to 'drift_share'")
+            drift_score = fallback_share
+
+        drift_detected = drift_score > DRIFT_THRESHOLD
 
         logger.info(f'Drift score: {drift_score:.4f} (threshold: {DRIFT_THRESHOLD})')
 
