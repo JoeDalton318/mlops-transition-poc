@@ -314,5 +314,56 @@ def test_successive_requests_are_stable_no_response_drift(client):
         )
 
 
+# ---------------------------------------------------------------------------
+# Domaine d'entrainement et coherence entrainement/inference
+# Training domain and train/serve consistency
+# ---------------------------------------------------------------------------
+
+def test_feature_columns_match_training_order():
+    """
+    The inference vector must use exactly the feature names, and the order, used at
+    training time. This is the executable guard against the silent failure mode:
+    scikit-learn accepts a reordered positional array and returns wrong predictions
+    without raising.
+    """
+    sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+    import train
+    import app as app_module
+
+    X, _ = train.load_and_prepare_data()
+
+    assert list(X.columns) == app_module.FEATURE_COLUMNS, (
+        'src/app.py::FEATURE_COLUMNS diverged from the training feature order in '
+        'src/train.py::load_and_prepare_data: predictions would be silently wrong.'
+    )
+
+
+def test_prediction_inside_training_domain_is_not_flagged(client):
+    """A request inside the training domain must not be flagged as an extrapolation."""
+    response = client.post('/predict', json=VALID_FEATURES)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['out_of_training_domain'] is False
+    assert data['domain_warnings'] == []
+
+
+def test_prediction_outside_training_domain_is_flagged(client):
+    """
+    A request accepted by the Pydantic bounds but outside the range actually covered by
+    the training set must still be answered, and explicitly flagged.
+    """
+    payload = dict(VALID_FEATURES)
+    payload['Nb_Pieces'] = 8  # accepte par le schema (<= 10), hors domaine (1 a 5)
+
+    response = client.post('/predict', json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['out_of_training_domain'] is True
+    assert any('Nb_Pieces' in message for message in data['domain_warnings'])
+    assert isinstance(data['predicted_price_k_eur'], float)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

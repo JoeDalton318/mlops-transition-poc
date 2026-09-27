@@ -62,6 +62,7 @@ Ce dépôt met cette hypothèse à l'épreuve sur un cas minimal mais complet : 
 | Entraînement et suivi | `src/train.py` | `LinearRegression`, journalisation MLflow, enregistrement au Model Registry |
 | Porte de promotion | `src/train.py::promote_challenger_if_better` | Le challenger ne devient champion que s'il bat strictement le R² du champion |
 | API de prédiction | `src/app.py` | FastAPI : `GET /`, `GET /health`, `POST /predict`, documentation interactive sur `/docs` |
+| Contrôle du domaine de validité | `src/app.py::check_training_domain` | Chaque réponse indique si la demande sort du domaine couvert par les données d'entraînement |
 | Détection de dérive | `src/drift_detection.py` | Evidently AI `DataDriftPreset`, rapport HTML horodaté, seuil du projet 0,20 |
 | Réentraînement conditionnel | `src/drift_detection.py::trigger_retraining` | Appelle le pipeline d'entraînement lorsque la dérive dépasse le seuil |
 | Tableau de bord | `src/dashboard.py` | Streamlit : état des services, prédiction, dernier rapport de dérive, bouton de réentraînement |
@@ -113,7 +114,7 @@ mlops-transition-poc/
 │   ├── app.py                # API FastAPI (/, /health, /predict)
 │   ├── drift_detection.py    # Détection de dérive Evidently + déclenchement du réentraînement
 │   └── dashboard.py          # Tableau de bord Streamlit
-├── tests/                    # 86 tests pytest (détail en section 11)
+├── tests/                    # 89 tests pytest (détail en section 11)
 │   ├── test_train.py
 │   ├── test_api.py
 │   ├── test_app_robustness.py
@@ -275,11 +276,11 @@ Pour une boucle de développement rapide, sans les tests d'intégration :
 pytest tests/ -v -m "not integration"
 ```
 
-**86 tests**, répartis en sept fichiers :
+**89 tests**, répartis en sept fichiers :
 
 | Fichier | Tests | Ce qui est vérifié |
 |---|---|---|
-| `test_api.py` | 28 | `/health`, `/predict`, les 7 bornes Pydantic (valeurs limites acceptées et rejetées), scénario métier, stabilité sur requêtes successives |
+| `test_api.py` | 31 | `/health`, `/predict`, les 7 bornes Pydantic (valeurs limites acceptées et rejetées), scénario métier, stabilité sur requêtes successives, cohérence de l'ordre des variables entre entraînement et inférence, signalement d'extrapolation |
 | `test_train.py` | 16 | Chargement des données, métriques, signe et monotonicité des coefficients, reproductibilité stricte, jeu vide ou absent, porte de promotion, étiquettes de gouvernance |
 | `test_data_schema.py` | 14 | Colonnes, bornes, valeurs binaires, non-saturation de la cible (garde-fou d'un bug historique du générateur) |
 | `test_dashboard.py` | 9 | `check_api_health`, `get_latest_drift_report`, `send_prediction_request`, dégradation gracieuse quand l'API est hors ligne |
@@ -319,11 +320,29 @@ et renvoie, avec le champion de référence :
 {
   "predicted_price_k_eur": 431.89,
   "input_features": { "...": "..." },
-  "model_version": "1.0.0"
+  "model_version": "1.0.0",
+  "out_of_training_domain": false,
+  "domain_warnings": []
 }
 ```
 
 Une entrée hors bornes est refusée avec un code 422 et un message explicite. Par exemple `Surface_m2 = 500` produit `Input should be less than or equal to 300`.
+
+**Domaine de validité.** Les bornes du schéma vérifient la plausibilité physique d'une demande ; elles sont plus larges que l'intervalle de valeurs réellement couvert par le jeu d'entraînement. Une demande située hors de cet intervalle reçoit donc une prédiction, accompagnée d'un signalement explicite et d'un avertissement dans les journaux du service :
+
+```json
+{
+  "predicted_price_k_eur": 368.13,
+  "out_of_training_domain": true,
+  "domain_warnings": [
+    "Nb_Pieces=8 outside training domain [1, 5]",
+    "Annee_Construction=1920 outside training domain [1950, 2024]",
+    "Distance_Centre_km=80.0 outside training domain [0.5, 50.0]"
+  ]
+}
+```
+
+Le domaine de référence est déclaré dans `src/app.py::TRAINING_DOMAIN` : `Surface_m2` de 30 à 300, `Nb_Pieces` de 1 à 5, `Annee_Construction` de 1950 à 2024, `Distance_Centre_km` de 0,5 à 50, `DPE_Energy_Class` de 1 à 7, `Has_Balcony` et `Has_Parking` à 0 ou 1. Ces valeurs correspondent exactement aux bornes du générateur et ont été relevées sur le fichier réel. Le tableau de bord affiche le même avertissement sous le prix prédit.
 
 ### Tableau de bord
 
@@ -407,7 +426,7 @@ Deux remarques utiles à la lecture :
 ## 17. Limites connues
 
 1. **La boucle d'apprentissage n'est pas fermée.** `trigger_retraining()` appelle `run_pipeline()` sans lui transmettre les données dérivées ; le pipeline recharge le fichier de référence depuis le disque. À graine fixée, le challenger reproduit donc exactement le champion et n'est jamais promu. Ce comportement est volontairement figé par un test de non-régression (`test_full_self_healing_loop_champion_then_drift_then_retrain`).
-2. **Les bornes de l'API sont plus larges que le domaine d'entraînement.** Le générateur produit `Nb_Pieces` entre 1 et 5, `Annee_Construction` entre 1950 et 2024, `Surface_m2` entre 30 et 300, `Distance_Centre_km` entre 0,5 et 50 ; l'API accepte respectivement 1 à 10, 1900 à 2024, plus de 0 jusqu'à 300, et 0 à 100. Une requête hors du domaine d'entraînement reçoit une extrapolation, sans avertissement.
+2. **Les bornes de l'API restent plus larges que le domaine d'entraînement**, par choix : l'API répond à une demande physiquement plausible même si le modèle n'a pas été entraîné sur ce type de bien. L'extrapolation n'est plus silencieuse — elle est signalée dans la réponse et dans les journaux (section 12) — mais elle reste une extrapolation, dont la qualité n'est pas mesurée.
 3. **`model_version` est une constante.** L'API renvoie toujours `"1.0.0"`, sans lien avec la version du Model Registry : le maillon prédiction → modèle est manquant.
 4. **Aucun journal des prédictions.** Une prédiction ne peut pas être reliée après coup au modèle qui l'a produite.
 5. **Pas d'orchestrateur ni de planification.** La détection de dérive est lancée à la main, en ligne de commande ou par le bouton du tableau de bord.
@@ -422,13 +441,12 @@ Par ordre de valeur décroissante :
 
 1. Transmettre les données courantes au réentraînement et évaluer champion et challenger sur un jeu commun.
 2. Journaliser chaque prédiction avec la version du modèle et un horodatage.
-3. Construire le tableau de prédiction à l'inférence avec les noms de colonnes de l'entraînement, plutôt qu'une liste positionnelle, afin d'éliminer toute dépendance à l'ordre des variables.
-4. Aligner les bornes de validation de l'API sur le domaine d'entraînement, ou signaler explicitement l'extrapolation.
-5. Remplacer la constante `model_version` par la version réelle issue du registre.
-6. Ajouter un test de significativité à la porte de promotion, ou un déploiement fantôme.
-7. Introduire un orchestrateur et une planification de la surveillance.
-8. Publier l'image sur un registre et automatiser le déploiement, avec validation humaine.
-9. Rendre le lint bloquant et étendre les règles retenues.
+3. Remplacer la constante `model_version` par la version réelle issue du registre.
+4. Mesurer la dégradation du modèle hors domaine, pour passer d'un signalement qualitatif à une incertitude chiffrée.
+5. Ajouter un test de significativité à la porte de promotion, ou un déploiement fantôme.
+6. Introduire un orchestrateur et une planification de la surveillance.
+7. Publier l'image sur un registre et automatiser le déploiement, avec validation humaine.
+8. Rendre le lint bloquant et étendre les règles retenues.
 
 ## 19. Procédure de vérification depuis un clone propre
 
@@ -445,9 +463,9 @@ Cette procédure a été exécutée le 27 septembre 2026 sur une copie fraîchem
 | 7 | Générer les données | `python generate_data.py` | `data/immobilier_france.csv`, 500 lignes |
 | 8 | Entraîner | `python src/train.py` | `r2` = 0.9779899998391454 ; `models/housing_model.pkl` créé |
 | 9 | Contrôle de style | `flake8 src/ tests/ --select=E9,F63,F7,F82` | Aucune erreur |
-| 10 | Tests | `pytest tests/ -v` | 86 tests passants |
+| 10 | Tests | `pytest tests/ -v` | 89 tests passants |
 | 11 | Lancer l'API | `uvicorn src.app:app --port 8000` | `GET /health` renvoie `model_status: loaded` |
-| 12 | Prédire | `POST /predict` avec l'exemple de la section 12 | `predicted_price_k_eur` = 431.89 |
+| 12 | Prédire | `POST /predict` avec l'exemple de la section 12 | `predicted_price_k_eur` = 431.89, `out_of_training_domain` = false |
 | 13 | Dérive | `python src/drift_detection.py` | `Drift score: 0.2500` ; rapport HTML dans `drift_reports/` |
 | 14 | Docker | `docker compose up --build` puis `docker compose down` | Trois services démarrés, puis arrêtés proprement |
 
@@ -483,7 +501,7 @@ Cette procédure a été exécutée le 27 septembre 2026 sur une copie fraîchem
 5. exécution de la suite pytest ;
 6. construction de l'image Docker et vérification de son démarrage.
 
-Dernière exécution vérifiée : 27 septembre 2026, succès en 1 min 52 s, 86 tests passants en 16,35 s sous Python 3.12.14.
+Dernière exécution vérifiée : 27 septembre 2026, 89 tests passants sous Python 3.12.14.
 
 ## 22. Références
 

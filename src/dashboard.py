@@ -57,6 +57,7 @@ TRANSLATIONS = {
         'predicted_price': 'Predicted Price',
         'price_range': 'Estimated Range',
         'view_features': 'View Input Features',
+        'out_of_domain': 'Outside the training domain: this prediction is an extrapolation.',
         'drift_monitoring': 'Data Drift Monitoring',
         'latest_report': 'Latest Drift Report',
         'report_generated': 'Report generated',
@@ -114,6 +115,7 @@ TRANSLATIONS = {
         'predicted_price': 'Prix Prédit',
         'price_range': 'Fourchette Estimée',
         'view_features': 'Afficher les Caractéristiques',
+        'out_of_domain': 'Hors du domaine d\'entraînement : cette prédiction est une extrapolation.',
         'drift_monitoring': 'Surveillance de la Dérive de Données',
         'latest_report': 'Dernier Rapport de Dérive',
         'report_generated': 'Rapport généré',
@@ -409,7 +411,12 @@ def render_prediction_section() -> None:
                 delta=f"{t('price_range')}: {price * 0.85:.0f} - {price * 1.15:.0f} k€"
             )
             st.markdown('</div>', unsafe_allow_html=True)
-            
+
+            if prediction_result.get('out_of_training_domain'):
+                st.warning(
+                    t('out_of_domain') + ' ' + ' | '.join(prediction_result.get('domain_warnings', []))
+                )
+
             with st.expander(t('view_features')):
                 st.json(features)
     st.divider()

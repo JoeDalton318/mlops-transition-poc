@@ -15,8 +15,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
 import joblib
 import os
+import pandas as pd
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 from sklearn.linear_model import LinearRegression
 from dotenv import load_dotenv
 import logging
@@ -39,6 +40,42 @@ app = FastAPI(
 # Utilise la variable d'environnement MODELS_DIR ou 'models' par défaut
 models_dir_env = os.getenv('MODELS_DIR', 'models')
 MODEL_PATH = Path(__file__).parent.parent / models_dir_env / 'housing_model.pkl'
+
+# Ordre des variables tel qu'utilisé à l'entraînement (src/train.py::load_and_prepare_data).
+# Le vecteur d'inférence est construit comme un DataFrame portant ces noms, et non comme une
+# liste positionnelle : sans les noms, scikit-learn accepte silencieusement un ordre de colonnes
+# différent de celui de l'entraînement et renvoie des prédictions fausses sans aucune erreur.
+# Feature order used at training time. The inference vector is a named DataFrame rather than a
+# positional list: without names, scikit-learn silently accepts a different column order and
+# returns wrong predictions with no error.
+FEATURE_COLUMNS: List[str] = [
+    'Surface_m2',
+    'Nb_Pieces',
+    'Annee_Construction',
+    'Distance_Centre_km',
+    'DPE_Energy_Class',
+    'Has_Balcony',
+    'Has_Parking',
+]
+
+# Domaine effectivement couvert par le jeu d'entraînement (data/immobilier_france.csv, 500
+# lignes) : bornes issues des seuils de generate_data.py et relevées sur le fichier réel.
+# Les bornes du schéma Pydantic ci-dessous restent volontairement plus larges — elles vérifient
+# la plausibilité physique d'une demande, pas la validité du modèle. Une demande située hors de
+# ce domaine reçoit donc une prédiction, mais celle-ci est explicitement signalée comme une
+# extrapolation.
+# Domain actually covered by the training set. The Pydantic bounds below stay deliberately
+# wider: they check physical plausibility, not model validity. Requests outside this domain are
+# answered, but the answer is explicitly flagged as an extrapolation.
+TRAINING_DOMAIN: Dict[str, Tuple[float, float]] = {
+    'Surface_m2': (30.0, 300.0),
+    'Nb_Pieces': (1, 5),
+    'Annee_Construction': (1950, 2024),
+    'Distance_Centre_km': (0.5, 50.0),
+    'DPE_Energy_Class': (1, 7),
+    'Has_Balcony': (0, 1),
+    'Has_Parking': (0, 1),
+}
 
 
 class HousingFeatures(BaseModel):
@@ -90,10 +127,44 @@ class PredictionResponse(BaseModel):
     """
     Response schema for price predictions.
     Schéma de réponse pour les prédictions de prix.
+
+    The two domain fields state whether the request lies inside the range of values the model
+    was actually trained on. A prediction outside that range is an extrapolation: it is returned,
+    but it must not be read with the same confidence.
+    Les deux champs de domaine indiquent si la demande se situe dans l'intervalle de valeurs sur
+    lequel le modèle a réellement été entraîné. Une prédiction hors de cet intervalle est une
+    extrapolation : elle est renvoyée, mais ne doit pas être lue avec la même confiance.
     """
     predicted_price_k_eur: float = Field(..., description='Predicted price in thousands of EUR / Prix prédit en milliers d\'EUR')
     input_features: HousingFeatures
     model_version: str = '1.0.0'
+    out_of_training_domain: bool = Field(default=False, description='True if at least one feature lies outside the training domain / Vrai si au moins une variable sort du domaine d\'entraînement')
+    domain_warnings: List[str] = Field(default_factory=list, description='One message per feature outside the training domain / Un message par variable hors du domaine d\'entraînement')
+
+
+def check_training_domain(feature_values: Dict[str, float]) -> List[str]:
+    """
+    List the features whose value lies outside the training domain.
+    Liste les variables dont la valeur sort du domaine d'entraînement.
+
+    Args:
+        feature_values: Mapping feature name -> submitted value. (Association nom de variable ->
+                        valeur soumise.)
+
+    Returns:
+        One human-readable message per out-of-domain feature, in the declaration order of
+        TRAINING_DOMAIN; an empty list when the whole request lies inside the domain.
+        (Un message lisible par variable hors domaine, dans l'ordre de déclaration de
+        TRAINING_DOMAIN ; liste vide si toute la demande est dans le domaine.)
+    """
+    messages: List[str] = []
+    for name, (low, high) in TRAINING_DOMAIN.items():
+        value = feature_values[name]
+        if value < low or value > high:
+            messages.append(
+                f'{name}={value} outside training domain [{low}, {high}]'
+            )
+    return messages
 
 
 def load_model() -> LinearRegression:
@@ -196,22 +267,22 @@ async def predict_price(features: HousingFeatures) -> PredictionResponse:
         )
 
     try:
-        # Préparer les caractéristiques sous forme de tableau correspondant à l'ordre d'entraînement du modèle
-        # Prepare features as array matching model training order
-        feature_array = [
-            [
-                features.Surface_m2,
-                features.Nb_Pieces,
-                features.Annee_Construction,
-                features.Distance_Centre_km,
-                features.DPE_Energy_Class,
-                features.Has_Balcony,
-                features.Has_Parking,
-            ]
-        ]
+        # Construire le vecteur d'inférence avec les noms de colonnes de l'entraînement :
+        # scikit-learn peut alors détecter lui-même une incohérence de schéma, au lieu de
+        # dépendre silencieusement de l'ordre des valeurs.
+        # Build the inference vector with the training column names, so that scikit-learn can
+        # detect a schema mismatch itself instead of silently depending on value order.
+        feature_values = features.model_dump()
+        feature_frame = pd.DataFrame([feature_values], columns=FEATURE_COLUMNS)
 
         # Générer la prédiction (Generate prediction)
-        prediction = model.predict(feature_array)[0]
+        prediction = model.predict(feature_frame)[0]
+
+        # Signaler une éventuelle extrapolation hors du domaine d'entraînement
+        # (Flag a possible extrapolation outside the training domain)
+        domain_warnings = check_training_domain(feature_values)
+        if domain_warnings:
+            logger.warning('Prediction outside training domain: %s', '; '.join(domain_warnings))
 
         logger.info(f'Prediction generated: {prediction:.2f} k EUR for input {features}')
 
@@ -219,6 +290,8 @@ async def predict_price(features: HousingFeatures) -> PredictionResponse:
             predicted_price_k_eur=round(prediction, 2),
             input_features=features,
             model_version='1.0.0',
+            out_of_training_domain=bool(domain_warnings),
+            domain_warnings=domain_warnings,
         )
 
     except Exception as e:

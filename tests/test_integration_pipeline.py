@@ -373,7 +373,9 @@ def test_api_serves_the_actually_promoted_model_and_reacts_to_artifact_changes(
         'Has_Balcony': 1,
         'Has_Parking': 1,
     }
-    feature_row = [[sample_features[col] for col in FEATURE_COLUMNS]]
+    # DataFrame nomme, comme le fait l'API : la comparaison porte alors sur le meme
+    # schema d'entree que celui du service.
+    feature_row = pd.DataFrame([sample_features], columns=FEATURE_COLUMNS)
 
     df_a = _make_synthetic_dataset(n=200, seed=4, signal_strength=0.5)
     df_a.to_csv(isolated_mlops_environment.data_file, index=False)
